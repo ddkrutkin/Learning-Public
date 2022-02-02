@@ -1,0 +1,77 @@
+---
+title: "Analysis of single-cell RNA-seq data: Dimensionality reduction, clustering, and lineage inference"
+author: "Dennis Dimitri Krutkin"
+date: "2/1/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Getting Started
+1. Dimensionality reduction accounting for zero inflation and over-dispersion and adjusting for gene and cell-level covariates, using the zinbwave Bioconductor package;
+2. Robust and stable cell clustering using resampling-based sequential ensemble clustering, as implemented in the clusterExperiment Bioconductor package
+3. Inference of cell lineages and ordering of the cells by developmental progression along lineages, using the slingshot R package
+4. DE analysis along lineages
+
+Throughout the workflow, we use a single SingleCellExperiment object to store the scRNA-seq data along with any gene or cell-level metadata available from the experiment.
+```{r}
+#Clearing the workspace:
+rm(list=ls())
+```
+
+
+### The Data
+```{r}
+# Bioconductor
+library(BiocParallel)
+library(SingleCellExperiment)
+library(clusterExperiment)
+library(scone)
+library(zinbwave)
+library(slingshot)
+# CRAN
+library(gam)
+library(RColorBrewer)
+
+set.seed(20)
+```
+
+### Parallel computing
+The BiocParallel package can be used to allow for parallel computing in zinbwave. Here, we use a single CPU to run the function, registering the serial mode of BiocParallel. Users that have access to more than one core in their system are encouraged to use multiple cores to increase speed.
+```{r}
+register(SerialParam())
+```
+
+## The SingleCellExperiment class
+```{r}
+load(file='fletcher.rda')
+fletcher
+```
+
+```{r}
+colData(fletcher)
+```
+
+
+## Pre-processing
+Using the Bioconductor package scone, we remove low-quality cells according to the quality control filter implemented in the function metric_sample_filter and based on the following criteria
+
+### Sample filtering
+```{r}
+# QC-metric-based sample-filtering
+data("housekeeping")
+
+hk = rownames(fletcher)[toupper(rownames(fletcher)) %in% housekeeping$V1]
+
+mfilt = metric_sample_filter(counts(fletcher), 
+                             nreads = colData(fletcher)$NREADS,
+                             ralign = colData(fletcher)$RALIGN,
+                             pos_controls = rownames(fletcher) %in% hk,
+                             zcut = 3, mixture = FALSE,
+                             plot = TRUE)
+```
+
+## Normalization and dimensionality reduction: ZINB-WaVE
